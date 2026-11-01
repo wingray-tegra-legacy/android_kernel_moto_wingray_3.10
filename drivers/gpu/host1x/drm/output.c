@@ -23,6 +23,22 @@ static int tegra_connector_get_modes(struct drm_connector *connector)
 		edid = kmemdup(output->edid, sizeof(*edid), GFP_KERNEL);
 	else if (output->ddc)
 		edid = drm_get_edid(connector, output->ddc);
+	else if (output->has_fixed_mode) {
+		struct drm_display_mode *mode;
+
+		drm_mode_connector_update_edid_property(connector, NULL);
+		mode = drm_mode_duplicate(connector->dev, &output->fixed_mode);
+		if (!mode)
+			return -ENOMEM;
+
+		mode->type |= DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
+		mode->width_mm = output->width_mm;
+		mode->height_mm = output->height_mm;
+		drm_mode_probed_add(connector, mode);
+		connector->display_info.width_mm = output->width_mm;
+		connector->display_info.height_mm = output->height_mm;
+		return 1;
+	}
 
 	drm_mode_connector_update_edid_property(connector, edid);
 
@@ -175,7 +191,7 @@ int tegra_output_parse_dt(struct tegra_output *output)
 		of_node_put(ddc);
 	}
 
-	if (!output->edid && !output->ddc)
+	if (!output->edid && !output->ddc && !output->has_fixed_mode)
 		return -ENODEV;
 
 	output->hpd_gpio = of_get_named_gpio_flags(output->of_node,

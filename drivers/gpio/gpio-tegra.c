@@ -30,6 +30,7 @@
 #include <linux/irqchip/chained_irq.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/pm.h>
+#include <linux/platform_data/tegra-gpio.h>
 
 #define GPIO_BANK(x)		((x) >> 5)
 #define GPIO_PORT(x)		(((x) >> 3) & 0x3)
@@ -406,7 +407,9 @@ static struct lock_class_key gpio_lock_class;
 static int tegra_gpio_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match;
-	struct tegra_gpio_soc_config *config;
+	const struct tegra_gpio_platform_data *pdata = pdev->dev.platform_data;
+	const struct tegra_gpio_soc_config *config;
+	struct tegra_gpio_soc_config legacy_config;
 	struct resource *res;
 	struct tegra_gpio_bank *bank;
 	int gpio;
@@ -414,11 +417,16 @@ static int tegra_gpio_probe(struct platform_device *pdev)
 	int j;
 
 	match = of_match_device(tegra_gpio_of_match, &pdev->dev);
-	if (!match) {
+	if (match) {
+		config = match->data;
+	} else if (pdata) {
+		legacy_config.bank_stride = pdata->bank_stride;
+		legacy_config.upper_offset = pdata->upper_offset;
+		config = &legacy_config;
+	} else {
 		dev_err(&pdev->dev, "Error: No device match found\n");
 		return -ENODEV;
 	}
-	config = (struct tegra_gpio_soc_config *)match->data;
 
 	tegra_gpio_bank_stride = config->bank_stride;
 	tegra_gpio_upper_offset = config->upper_offset;

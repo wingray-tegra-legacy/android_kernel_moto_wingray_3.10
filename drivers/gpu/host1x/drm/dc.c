@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/clk/tegra.h>
 
 #include "host1x_client.h"
@@ -325,8 +326,10 @@ static int tegra_dc_set_timings(struct tegra_dc *dc,
 				struct drm_display_mode *mode)
 {
 	/* TODO: For HDMI compliance, h & v ref_to_sync should be set to 1 */
-	unsigned int h_ref_to_sync = 0;
-	unsigned int v_ref_to_sync = 0;
+	unsigned int h_ref_to_sync = dc->legacy_mode ?
+		dc->legacy_mode->h_ref_to_sync : 0;
+	unsigned int v_ref_to_sync = dc->legacy_mode ?
+		dc->legacy_mode->v_ref_to_sync : 0;
 	unsigned long value;
 
 	tegra_dc_writel(dc, 0x0, DC_DISP_DISP_TIMING_OPTIONS);
@@ -1105,6 +1108,7 @@ static const struct host1x_client_ops dc_client_ops = {
 static int tegra_dc_probe(struct platform_device *pdev)
 {
 	struct host1x_drm *host1x = host1x_get_drm_data(pdev->dev.parent);
+	const struct tegra_dc_platform_data *pdata = pdev->dev.platform_data;
 	struct resource *regs;
 	struct tegra_dc *dc;
 	int err;
@@ -1116,6 +1120,15 @@ static int tegra_dc_probe(struct platform_device *pdev)
 	spin_lock_init(&dc->lock);
 	INIT_LIST_HEAD(&dc->list);
 	dc->dev = &pdev->dev;
+	if (!pdev->dev.of_node && pdata)
+		dc->legacy_mode = pdata->mode;
+	if (!pdev->dev.of_node) {
+		struct pinctrl *pinctrl;
+
+		pinctrl = devm_pinctrl_get_select_default(&pdev->dev);
+		if (IS_ERR(pinctrl))
+			return PTR_ERR(pinctrl);
+	}
 
 	dc->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(dc->clk)) {
@@ -1184,7 +1197,13 @@ static struct of_device_id tegra_dc_of_match[] = {
 	{ },
 };
 
+static const struct platform_device_id tegra_dc_ids[] = {
+	{ "tegradc", 0 },
+	{ }
+};
+
 struct platform_driver tegra_dc_driver = {
+	.id_table = tegra_dc_ids,
 	.driver = {
 		.name = "tegra-dc",
 		.owner = THIS_MODULE,

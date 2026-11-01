@@ -15,6 +15,8 @@
 #include "iomap.h"
 #include "pmc.h"
 
+void __init stingray_display_init(void);
+
 #define STINGRAY_UARTB_IRQ 69
 
 static struct plat_serial8250_port stingray_uart_ports[] = {
@@ -112,6 +114,7 @@ static void __init stingray_init_machine(void)
 		pr_err("stingray: UARTB registration failed: %d\n", err);
 
 	stingray_storage_init();
+	stingray_display_init();
 }
 
 MACHINE_START(STINGRAY, "Motorola Xoom Wingray/Stingray")

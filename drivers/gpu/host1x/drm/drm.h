@@ -16,6 +16,7 @@
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_fixed.h>
 #include <uapi/drm/tegra_drm.h>
+#include <linux/platform_data/tegra-host1x.h>
 
 #include "host1x.h"
 
@@ -112,6 +113,7 @@ struct tegra_dc {
 	int irq;
 
 	struct tegra_output *rgb;
+	const struct tegra_dc_legacy_mode *legacy_mode;
 
 	struct list_head list;
 
@@ -197,6 +199,10 @@ struct tegra_output {
 
 	struct i2c_adapter *ddc;
 	const struct edid *edid;
+	struct drm_display_mode fixed_mode;
+	bool has_fixed_mode;
+	unsigned int width_mm;
+	unsigned int height_mm;
 	unsigned int hpd_irq;
 	int hpd_gpio;
 

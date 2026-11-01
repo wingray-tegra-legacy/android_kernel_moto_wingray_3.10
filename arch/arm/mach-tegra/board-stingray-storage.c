@@ -4,6 +4,7 @@
 #include <linux/platform_device.h>
 #include <linux/pinctrl/machine.h>
 #include <linux/platform_data/tegra-sdhci.h>
+#include <linux/platform_data/tegra-gpio.h>
 #include <linux/platform_data/tegra-pinctrl.h>
 #include <linux/sizes.h>
 
@@ -13,6 +14,37 @@
 
 #define TEGRA_GIC_IRQ(n) ((n) + 32)
 #define STINGRAY_PINCTRL_NAME "tegra20-pinctrl"
+
+static struct resource stingray_gpio_resources[] = {
+	{ .start = 0x6000d000, .end = 0x6000dfff, .flags = IORESOURCE_MEM },
+	{ .start = TEGRA_GIC_IRQ(32), .end = TEGRA_GIC_IRQ(32),
+	  .flags = IORESOURCE_IRQ },
+	{ .start = TEGRA_GIC_IRQ(33), .end = TEGRA_GIC_IRQ(33),
+	  .flags = IORESOURCE_IRQ },
+	{ .start = TEGRA_GIC_IRQ(34), .end = TEGRA_GIC_IRQ(34),
+	  .flags = IORESOURCE_IRQ },
+	{ .start = TEGRA_GIC_IRQ(35), .end = TEGRA_GIC_IRQ(35),
+	  .flags = IORESOURCE_IRQ },
+	{ .start = TEGRA_GIC_IRQ(55), .end = TEGRA_GIC_IRQ(55),
+	  .flags = IORESOURCE_IRQ },
+	{ .start = TEGRA_GIC_IRQ(87), .end = TEGRA_GIC_IRQ(87),
+	  .flags = IORESOURCE_IRQ },
+	{ .start = TEGRA_GIC_IRQ(89), .end = TEGRA_GIC_IRQ(89),
+	  .flags = IORESOURCE_IRQ },
+};
+
+static const struct tegra_gpio_platform_data stingray_gpio_data = {
+	.bank_stride = 0x80,
+	.upper_offset = 0x800,
+};
+
+static struct platform_device stingray_gpio_device = {
+	.name = "tegra-gpio",
+	.id = -1,
+	.num_resources = ARRAY_SIZE(stingray_gpio_resources),
+	.resource = stingray_gpio_resources,
+	.dev.platform_data = (void *)&stingray_gpio_data,
+};
 
 static struct resource stingray_pinctrl_resources[] = {
 	{ .start = TEGRA_APB_MISC_BASE + 0x14,
@@ -155,6 +187,12 @@ static struct platform_device stingray_sdmmc4 =
 void __init stingray_storage_init(void)
 {
 	int err;
+
+	err = platform_device_register(&stingray_gpio_device);
+	if (err) {
+		pr_err("stingray: GPIO registration failed: %d\n", err);
+		return;
+	}
 
 	err = pinctrl_register_mappings(stingray_storage_pinmux,
 					ARRAY_SIZE(stingray_storage_pinmux));

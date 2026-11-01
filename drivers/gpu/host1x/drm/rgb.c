@@ -11,6 +11,8 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/platform_data/tegra-host1x.h>
+#include <linux/regulator/consumer.h>
 
 #include "drm.h"
 #include "dc.h"
@@ -19,6 +21,8 @@ struct tegra_rgb {
 	struct tegra_output output;
 	struct clk *clk_parent;
 	struct clk *clk;
+	struct regulator *panel_supply;
+	bool panel_enabled;
 };
 
 static inline struct tegra_rgb *to_rgb(struct tegra_output *output)
@@ -87,7 +91,16 @@ static void tegra_dc_write_regs(struct tegra_dc *dc,
 
 static int tegra_output_rgb_enable(struct tegra_output *output)
 {
+	struct tegra_rgb *rgb = to_rgb(output);
 	struct tegra_dc *dc = to_tegra_dc(output->encoder.crtc);
+	int err;
+
+	if (rgb->panel_supply && !rgb->panel_enabled) {
+		err = regulator_enable(rgb->panel_supply);
+		if (err)
+			return err;
+		rgb->panel_enabled = true;
+	}
 
 	tegra_dc_write_regs(dc, rgb_enable, ARRAY_SIZE(rgb_enable));
 
@@ -96,17 +109,27 @@ static int tegra_output_rgb_enable(struct tegra_output *output)
 
 static int tegra_output_rgb_disable(struct tegra_output *output)
 {
+	struct tegra_rgb *rgb = to_rgb(output);
 	struct tegra_dc *dc = to_tegra_dc(output->encoder.crtc);
+	int err = 0;
 
 	tegra_dc_write_regs(dc, rgb_disable, ARRAY_SIZE(rgb_disable));
+	if (rgb->panel_supply && rgb->panel_enabled) {
+		err = regulator_disable(rgb->panel_supply);
+		if (!err)
+			rgb->panel_enabled = false;
+	}
 
-	return 0;
+	return err;
 }
 
 static int tegra_output_rgb_setup_clock(struct tegra_output *output,
 					struct clk *clk, unsigned long pclk)
 {
 	struct tegra_rgb *rgb = to_rgb(output);
+
+	if (!rgb->clk_parent)
+		return 0;
 
 	return clk_set_parent(clk, rgb->clk_parent);
 }
@@ -135,13 +158,19 @@ static const struct tegra_output_ops rgb_ops = {
 
 int tegra_dc_rgb_probe(struct tegra_dc *dc)
 {
-	struct device_node *np;
+	struct device_node *np = NULL;
+	const struct tegra_dc_platform_data *pdata = dc->dev->platform_data;
+	const struct tegra_dc_legacy_mode *panel_mode;
 	struct tegra_rgb *rgb;
 	int err;
 
-	np = of_get_child_by_name(dc->dev->of_node, "rgb");
-	if (!np || !of_device_is_available(np))
+	if (dc->dev->of_node) {
+		np = of_get_child_by_name(dc->dev->of_node, "rgb");
+		if (!np || !of_device_is_available(np))
+			return -ENODEV;
+	} else if (!pdata || !pdata->mode) {
 		return -ENODEV;
+	}
 
 	rgb = devm_kzalloc(dc->dev, sizeof(*rgb), GFP_KERNEL);
 	if (!rgb)
@@ -153,24 +182,54 @@ int tegra_dc_rgb_probe(struct tegra_dc *dc)
 		return PTR_ERR(rgb->clk);
 	}
 
-	rgb->clk_parent = devm_clk_get(dc->dev, "parent");
-	if (IS_ERR(rgb->clk_parent)) {
-		dev_err(dc->dev, "failed to get parent clock\n");
-		return PTR_ERR(rgb->clk_parent);
-	}
-
-	err = clk_set_parent(rgb->clk, rgb->clk_parent);
-	if (err < 0) {
-		dev_err(dc->dev, "failed to set parent clock: %d\n", err);
-		return err;
-	}
-
 	rgb->output.dev = dc->dev;
-	rgb->output.of_node = np;
+	rgb->output.hpd_gpio = -EINVAL;
+	if (dc->dev->of_node) {
+		rgb->clk_parent = devm_clk_get(dc->dev, "parent");
+		if (IS_ERR(rgb->clk_parent)) {
+			dev_err(dc->dev, "failed to get parent clock\n");
+			return PTR_ERR(rgb->clk_parent);
+		}
 
-	err = tegra_output_parse_dt(&rgb->output);
-	if (err < 0)
-		return err;
+		err = clk_set_parent(rgb->clk, rgb->clk_parent);
+		if (err < 0) {
+			dev_err(dc->dev, "failed to set parent clock: %d\n", err);
+			return err;
+		}
+
+		rgb->output.of_node = np;
+		err = tegra_output_parse_dt(&rgb->output);
+		if (err < 0)
+			return err;
+	} else {
+		panel_mode = pdata->mode;
+		rgb->panel_supply = devm_regulator_get(dc->dev, "vdd_panel");
+		if (IS_ERR(rgb->panel_supply)) {
+			dev_err(dc->dev, "failed to get panel regulator\n");
+			return PTR_ERR(rgb->panel_supply);
+		}
+		rgb->output.has_fixed_mode = true;
+		rgb->output.width_mm = pdata->width_mm;
+		rgb->output.height_mm = pdata->height_mm;
+		rgb->output.fixed_mode.clock = panel_mode->pixelclock / 1000;
+		rgb->output.fixed_mode.hdisplay = panel_mode->hactive;
+		rgb->output.fixed_mode.hsync_start = panel_mode->hactive +
+			panel_mode->hfront_porch;
+		rgb->output.fixed_mode.hsync_end =
+			rgb->output.fixed_mode.hsync_start + panel_mode->hsync_len;
+		rgb->output.fixed_mode.htotal =
+			rgb->output.fixed_mode.hsync_end + panel_mode->hback_porch;
+		rgb->output.fixed_mode.vdisplay = panel_mode->vactive;
+		rgb->output.fixed_mode.vsync_start = panel_mode->vactive +
+			panel_mode->vfront_porch;
+		rgb->output.fixed_mode.vsync_end =
+			rgb->output.fixed_mode.vsync_start + panel_mode->vsync_len;
+		rgb->output.fixed_mode.vtotal =
+			rgb->output.fixed_mode.vsync_end + panel_mode->vback_porch;
+		rgb->output.fixed_mode.flags = DRM_MODE_FLAG_PHSYNC |
+			DRM_MODE_FLAG_PVSYNC;
+		drm_mode_set_name(&rgb->output.fixed_mode);
+	}
 
 	dc->rgb = &rgb->output;
 
@@ -179,11 +238,12 @@ int tegra_dc_rgb_probe(struct tegra_dc *dc)
 
 int tegra_dc_rgb_init(struct drm_device *drm, struct tegra_dc *dc)
 {
-	struct tegra_rgb *rgb = to_rgb(dc->rgb);
+	struct tegra_rgb *rgb;
 	int err;
 
 	if (!dc->rgb)
 		return -ENODEV;
+	rgb = to_rgb(dc->rgb);
 
 	rgb->output.type = TEGRA_OUTPUT_RGB;
 	rgb->output.ops = &rgb_ops;

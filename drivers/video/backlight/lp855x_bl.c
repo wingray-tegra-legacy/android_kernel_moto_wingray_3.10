@@ -70,6 +70,7 @@ struct lp855x {
 	struct device *dev;
 	struct lp855x_platform_data *pdata;
 	struct pwm_device *pwm;
+	bool legacy_enabled;
 };
 
 static int lp855x_write_byte(struct lp855x *lp, u8 reg, u8 data)
@@ -183,10 +184,12 @@ static int lp855x_configure(struct lp855x *lp)
 		}
 	}
 
-	val = pd->initial_brightness;
-	ret = lp855x_write_byte(lp, lp->cfg->reg_brightness, val);
-	if (ret)
-		goto err;
+	if (!pd->brightness_reg) {
+		val = pd->initial_brightness;
+		ret = lp855x_write_byte(lp, lp->cfg->reg_brightness, val);
+		if (ret)
+			goto err;
+	}
 
 	val = pd->device_control;
 	ret = lp855x_write_byte(lp, lp->cfg->reg_devicectrl, val);
@@ -245,9 +248,52 @@ static void lp855x_pwm_ctrl(struct lp855x *lp, int br, int max_br)
 static int lp855x_bl_update_status(struct backlight_device *bl)
 {
 	struct lp855x *lp = bl_get_data(bl);
+	struct lp855x_platform_data *pdata = lp->pdata;
+	int brightness;
+	int i;
+	int ret;
 
 	if (bl->props.state & BL_CORE_SUSPENDED)
 		bl->props.brightness = 0;
+	brightness = bl->props.brightness;
+
+	if (pdata->brightness_reg) {
+		if (!brightness) {
+			if (pdata->disable_control) {
+				ret = lp855x_write_byte(lp, lp->cfg->reg_devicectrl,
+							pdata->disable_control);
+				if (!ret)
+					lp->legacy_enabled = false;
+				return ret;
+			}
+			return 0;
+		}
+
+		if (pdata->enable_control && !lp->legacy_enabled) {
+			ret = lp855x_write_byte(lp, lp->cfg->reg_devicectrl,
+						pdata->enable_control);
+			if (ret)
+				return ret;
+
+			for (i = 0; pdata->rom_data &&
+			     i < pdata->size_program; i++) {
+				if (pdata->rom_data[i].addr == pdata->brightness_reg)
+					continue;
+
+				ret = lp855x_write_byte(lp, pdata->rom_data[i].addr,
+							pdata->rom_data[i].val);
+				if (ret)
+					return ret;
+			}
+			lp->legacy_enabled = true;
+		}
+
+		if (pdata->brightness_scale)
+			brightness = brightness * pdata->brightness_scale / 1000;
+
+		return lp855x_write_byte(lp, pdata->brightness_reg,
+					 brightness);
+	}
 
 	if (lp->mode == PWM_BASED) {
 		int br = bl->props.brightness;
@@ -257,7 +303,7 @@ static int lp855x_bl_update_status(struct backlight_device *bl)
 
 	} else if (lp->mode == REGISTER_BASED) {
 		u8 val = bl->props.brightness;
-		lp855x_write_byte(lp, lp->cfg->reg_brightness, val);
+		return lp855x_write_byte(lp, lp->cfg->reg_brightness, val);
 	}
 
 	return 0;

@@ -23,6 +23,7 @@
 #include <linux/of_device.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/platform_device.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/host1x.h>
@@ -89,13 +90,18 @@ MODULE_DEVICE_TABLE(of, host1x_of_match);
 static int host1x_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *id;
+	const struct host1x_info *info;
 	struct host1x *host;
 	struct resource *regs;
 	int syncpt_irq;
 	int err;
 
 	id = of_match_device(host1x_of_match, &pdev->dev);
-	if (!id)
+	if (id)
+		info = id->data;
+	else if (!pdev->dev.of_node)
+		info = &host1x01_info;
+	else
 		return -EINVAL;
 
 	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -115,7 +121,7 @@ static int host1x_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	host->dev = &pdev->dev;
-	host->info = id->data;
+	host->info = info;
 
 	/* set common host1x device data */
 	platform_set_drvdata(pdev, host);
@@ -183,7 +189,13 @@ static int __exit host1x_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct platform_device_id tegra_host1x_ids[] = {
+	{ "host1x", 0 },
+	{ }
+};
+
 static struct platform_driver tegra_host1x_driver = {
+	.id_table = tegra_host1x_ids,
 	.probe = host1x_probe,
 	.remove = __exit_p(host1x_remove),
 	.driver = {
