@@ -71,6 +71,14 @@ config ARCH_TEGRA_114_SOC
 	  Support for NVIDIA Tegra T114 processor family, based on the
 	  ARM CortexA15MP CPU
 
+config MACH_STINGRAY
+	bool "Motorola Xoom legacy boot support"
+	depends on ARCH_TEGRA_2x_SOC
+	default n
+	help
+	  Support Motorola Xoom devices booted with the Stingray ARM machine ID
+	  and ATAG memory information.
+
 config TEGRA_PCI
 	bool "PCI Express support"
 	depends on ARCH_TEGRA_2x_SOC

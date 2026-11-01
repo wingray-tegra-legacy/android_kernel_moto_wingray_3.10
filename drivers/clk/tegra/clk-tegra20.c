@@ -1287,28 +1287,9 @@ static const struct of_device_id pmc_match[] __initconst = {
 	{},
 };
 
-void __init tegra20_clock_init(struct device_node *np)
+static void __init tegra20_clock_init_common(void)
 {
 	int i;
-	struct device_node *node;
-
-	clk_base = of_iomap(np, 0);
-	if (!clk_base) {
-		pr_err("Can't map CAR registers\n");
-		BUG();
-	}
-
-	node = of_find_matching_node(NULL, pmc_match);
-	if (!node) {
-		pr_err("Failed to find pmc node\n");
-		BUG();
-	}
-
-	pmc_base = of_iomap(node, 0);
-	if (!pmc_base) {
-		pr_err("Can't map pmc registers\n");
-		BUG();
-	}
 
 	tegra20_osc_clk_init();
 	tegra20_pmc_clk_init();
@@ -1330,12 +1311,47 @@ void __init tegra20_clock_init(struct device_node *np)
 	}
 
 	tegra_init_dup_clks(tegra_clk_duplicates, clks, clk_max);
+	tegra_clk_apply_init_table = tegra20_clock_apply_init_table;
+	tegra_cpu_car_ops = &tegra20_cpu_car_ops;
+}
+
+void __init tegra20_clock_init(struct device_node *np)
+{
+	struct device_node *node;
+
+	clk_base = of_iomap(np, 0);
+	if (!clk_base) {
+		pr_err("Can't map CAR registers\n");
+		BUG();
+	}
+
+	node = of_find_matching_node(NULL, pmc_match);
+	if (!node) {
+		pr_err("Failed to find pmc node\n");
+		BUG();
+	}
+
+	pmc_base = of_iomap(node, 0);
+	if (!pmc_base) {
+		pr_err("Can't map pmc registers\n");
+		BUG();
+	}
+
+	tegra20_clock_init_common();
 
 	clk_data.clks = clks;
 	clk_data.clk_num = ARRAY_SIZE(clks);
 	of_clk_add_provider(np, of_clk_src_onecell_get, &clk_data);
+}
 
-	tegra_clk_apply_init_table = tegra20_clock_apply_init_table;
+void __init tegra20_clock_init_legacy(void)
+{
+	clk_base = ioremap(0x60006000, 0x1000);
+	pmc_base = ioremap(0x7000e400, 0x400);
+	if (!clk_base || !pmc_base) {
+		pr_err("Can't map Tegra20 clock or PMC registers\n");
+		BUG();
+	}
 
-	tegra_cpu_car_ops = &tegra20_cpu_car_ops;
+	tegra20_clock_init_common();
 }

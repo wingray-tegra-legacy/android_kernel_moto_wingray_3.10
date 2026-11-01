@@ -37,3 +37,4 @@ endif
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)		+= board-harmony-pcie.o
 
 obj-$(CONFIG_ARCH_TEGRA_2x_SOC)		+= board-paz00.o
+obj-$(CONFIG_MACH_STINGRAY)		+= board-stingray.o

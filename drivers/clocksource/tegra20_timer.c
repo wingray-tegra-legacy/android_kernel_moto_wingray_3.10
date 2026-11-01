@@ -43,6 +43,7 @@
 #define TIMER2_BASE 0x8
 #define TIMER3_BASE 0x50
 #define TIMER4_BASE 0x58
+#define TEGRA20_TIMER3_IRQ 73
 
 #define TIMER_PTV 0x0
 #define TIMER_PCR 0x4
@@ -154,35 +155,8 @@ static struct irqaction tegra_timer_irq = {
 	.dev_id		= &tegra_clockevent,
 };
 
-static void __init tegra20_init_timer(struct device_node *np)
+static void __init tegra20_timer_register(unsigned long rate)
 {
-	struct clk *clk;
-	unsigned long rate;
-	int ret;
-
-	timer_reg_base = of_iomap(np, 0);
-	if (!timer_reg_base) {
-		pr_err("Can't map timer registers\n");
-		BUG();
-	}
-
-	tegra_timer_irq.irq = irq_of_parse_and_map(np, 2);
-	if (tegra_timer_irq.irq <= 0) {
-		pr_err("Failed to map timer IRQ\n");
-		BUG();
-	}
-
-	clk = of_clk_get(np, 0);
-	if (IS_ERR(clk)) {
-		pr_warn("Unable to get timer clock. Assuming 12Mhz input clock.\n");
-		rate = 12000000;
-	} else {
-		clk_prepare_enable(clk);
-		rate = clk_get_rate(clk);
-	}
-
-	of_node_put(np);
-
 	switch (rate) {
 	case 12000000:
 		timer_writel(0x000b, TIMERUS_USEC_CFG);
@@ -208,9 +182,8 @@ static void __init tegra20_init_timer(struct device_node *np)
 		BUG();
 	}
 
-	ret = setup_irq(tegra_timer_irq.irq, &tegra_timer_irq);
-	if (ret) {
-		pr_err("Failed to register timer IRQ: %d\n", ret);
+	if (setup_irq(tegra_timer_irq.irq, &tegra_timer_irq)) {
+		pr_err("Failed to register timer IRQ\n");
 		BUG();
 	}
 
@@ -218,6 +191,62 @@ static void __init tegra20_init_timer(struct device_node *np)
 	tegra_clockevent.irq = tegra_timer_irq.irq;
 	clockevents_config_and_register(&tegra_clockevent, 1000000,
 					0x1, 0x1fffffff);
+}
+
+static void __init tegra20_init_timer(struct device_node *np)
+{
+	struct clk *clk;
+	unsigned long rate;
+
+	timer_reg_base = of_iomap(np, 0);
+	if (!timer_reg_base) {
+		pr_err("Can't map timer registers\n");
+		BUG();
+	}
+
+	tegra_timer_irq.irq = irq_of_parse_and_map(np, 2);
+	if (tegra_timer_irq.irq <= 0) {
+		pr_err("Failed to map timer IRQ\n");
+		BUG();
+	}
+
+	clk = of_clk_get(np, 0);
+	if (IS_ERR(clk)) {
+		pr_warn("Unable to get timer clock. Assuming 12Mhz input clock.\n");
+		rate = 12000000;
+	} else {
+		clk_prepare_enable(clk);
+		rate = clk_get_rate(clk);
+	}
+
+	of_node_put(np);
+	tegra20_timer_register(rate);
+}
+
+void __init tegra20_timer_init_legacy(void)
+{
+	struct clk *clk;
+	unsigned long rate = 12000000;
+
+	timer_reg_base = ioremap(0x60005000, 0x100);
+	if (!timer_reg_base) {
+		pr_err("Can't map timer registers\n");
+		BUG();
+	}
+
+	tegra_timer_irq.irq = TEGRA20_TIMER3_IRQ;
+	clk = clk_get_sys("timer", NULL);
+	if (!IS_ERR(clk)) {
+		if (!clk_prepare_enable(clk))
+			rate = clk_get_rate(clk);
+		else
+			pr_warn("Unable to enable timer clock; assuming 12MHz\n");
+		clk_put(clk);
+	} else {
+		pr_warn("Unable to get timer clock; assuming 12MHz\n");
+	}
+
+	tegra20_timer_register(rate);
 }
 CLOCKSOURCE_OF_DECLARE(tegra20_timer, "nvidia,tegra20-timer", tegra20_init_timer);
 
