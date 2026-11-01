@@ -25,6 +25,7 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/slot-gpio.h>
+#include <linux/platform_data/tegra-sdhci.h>
 
 #include <asm/gpio.h>
 
@@ -46,6 +47,7 @@ struct sdhci_tegra_soc_data {
 struct sdhci_tegra {
 	const struct sdhci_tegra_soc_data *soc_data;
 	int power_gpio;
+	bool cd_gpio_requested;
 };
 
 static u32 tegra_sdhci_readl(struct sdhci_host *host, int reg)
@@ -223,13 +225,20 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 	struct sdhci_host *host;
 	struct sdhci_pltfm_host *pltfm_host;
 	struct sdhci_tegra *tegra_host;
+	const struct tegra_sdhci_platform_data *pdata = pdev->dev.platform_data;
 	struct clk *clk;
 	int rc;
 
-	match = of_match_device(sdhci_tegra_dt_match, &pdev->dev);
-	if (!match)
-		return -EINVAL;
-	soc_data = match->data;
+	if (pdev->dev.of_node) {
+		match = of_match_device(sdhci_tegra_dt_match, &pdev->dev);
+		if (!match)
+			return -EINVAL;
+		soc_data = match->data;
+	} else {
+		if (!pdata || pdev->id < 1 || pdev->id > 3)
+			return -EINVAL;
+		soc_data = &soc_data_tegra20;
+	}
 
 	host = sdhci_pltfm_init(pdev, soc_data->pdata);
 	if (IS_ERR(host))
@@ -245,7 +254,21 @@ static int sdhci_tegra_probe(struct platform_device *pdev)
 	tegra_host->soc_data = soc_data;
 	pltfm_host->priv = tegra_host;
 
-	sdhci_tegra_parse_dt(&pdev->dev);
+	if (pdev->dev.of_node) {
+		sdhci_tegra_parse_dt(&pdev->dev);
+	} else {
+		tegra_host->power_gpio = -EINVAL;
+		if (pdata->bus_width == 8)
+			host->mmc->caps |= MMC_CAP_8_BIT_DATA;
+		if (pdata->nonremovable)
+			host->mmc->caps |= MMC_CAP_NONREMOVABLE;
+		if (gpio_is_valid(pdata->cd_gpio)) {
+			rc = mmc_gpio_request_cd(host->mmc, pdata->cd_gpio);
+			if (rc)
+				goto err_cd_req;
+			tegra_host->cd_gpio_requested = true;
+		}
+	}
 
 	if (gpio_is_valid(tegra_host->power_gpio)) {
 		rc = gpio_request(tegra_host->power_gpio, "sdhci_power");
@@ -279,7 +302,13 @@ err_clk_get:
 	if (gpio_is_valid(tegra_host->power_gpio))
 		gpio_free(tegra_host->power_gpio);
 err_power_req:
+	if (tegra_host->cd_gpio_requested)
+		mmc_gpio_free_cd(host->mmc);
 err_alloc_tegra_host:
+	sdhci_pltfm_free(pdev);
+	return rc;
+
+err_cd_req:
 	sdhci_pltfm_free(pdev);
 	return rc;
 }
@@ -295,6 +324,8 @@ static int sdhci_tegra_remove(struct platform_device *pdev)
 
 	if (gpio_is_valid(tegra_host->power_gpio))
 		gpio_free(tegra_host->power_gpio);
+	if (tegra_host->cd_gpio_requested)
+		mmc_gpio_free_cd(host->mmc);
 
 	clk_disable_unprepare(pltfm_host->clk);
 	clk_put(pltfm_host->clk);

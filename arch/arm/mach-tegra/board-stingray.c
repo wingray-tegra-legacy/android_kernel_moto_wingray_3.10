@@ -110,10 +110,12 @@ static void __init stingray_init_machine(void)
 	err = platform_device_register(&stingray_uart_device);
 	if (err)
 		pr_err("stingray: UARTB registration failed: %d\n", err);
+
+	stingray_storage_init();
 }
 
 MACHINE_START(STINGRAY, "Motorola Xoom Wingray/Stingray")
-	.boot_params	= 0x00000100,
+	.atag_offset	= 0x00000100,
 	.map_io		= tegra_map_common_io,
 	.reserve	= stingray_reserve,
 	.init_early	= tegra_init_early,
