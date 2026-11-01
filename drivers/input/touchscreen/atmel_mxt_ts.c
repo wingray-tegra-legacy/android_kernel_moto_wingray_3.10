@@ -15,6 +15,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
+#include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/i2c/atmel_mxt_ts.h>
 #include <linux/input/mt.h>
@@ -1054,6 +1055,10 @@ static ssize_t mxt_update_fw_store(struct device *dev,
 	struct mxt_data *data = dev_get_drvdata(dev);
 	int error;
 
+	if (data->client->addr != MXT_APP_LOW &&
+	    data->client->addr != MXT_APP_HIGH)
+		return -EOPNOTSUPP;
+
 	disable_irq(data->irq);
 
 	error = mxt_load_fw(dev, MXT_FW_NAME);
@@ -1149,8 +1154,9 @@ static int mxt_probe(struct i2c_client *client,
 
 	data->is_tp = pdata && pdata->is_tp;
 
-	input_dev->name = (data->is_tp) ? "Atmel maXTouch Touchpad" :
-					  "Atmel maXTouch Touchscreen";
+	input_dev->name = pdata->name ? pdata->name :
+		(data->is_tp ? "Atmel maXTouch Touchpad" :
+			"Atmel maXTouch Touchscreen");
 	snprintf(data->phys, sizeof(data->phys), "i2c-%u-%04x/input0",
 		 client->adapter->nr, client->addr);
 
@@ -1165,6 +1171,24 @@ static int mxt_probe(struct i2c_client *client,
 	data->input_dev = input_dev;
 	data->pdata = pdata;
 	data->irq = client->irq;
+
+	if (pdata->reset_gpio > 0) {
+		error = devm_gpio_request_one(&client->dev, pdata->reset_gpio,
+					     GPIOF_OUT_INIT_HIGH, "mxt-reset");
+		if (error)
+			goto err_free_mem;
+		gpio_set_value(pdata->reset_gpio, 0);
+		msleep(10);
+		gpio_set_value(pdata->reset_gpio, 1);
+		msleep(100);
+	}
+
+	if (pdata->wake_gpio > 0) {
+		error = devm_gpio_request_one(&client->dev, pdata->wake_gpio,
+					     GPIOF_OUT_INIT_LOW, "mxt-wake");
+		if (error)
+			goto err_free_mem;
+	}
 
 	mxt_calc_resolution(data);
 
@@ -1283,6 +1307,10 @@ static int mxt_suspend(struct device *dev)
 
 	if (input_dev->users)
 		mxt_stop(data);
+	if (data->pdata->wake_gpio > 0) {
+		gpio_set_value(data->pdata->wake_gpio, 1);
+		msleep(80);
+	}
 
 	mutex_unlock(&input_dev->mutex);
 
@@ -1294,6 +1322,11 @@ static int mxt_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
 	struct input_dev *input_dev = data->input_dev;
+
+	if (data->pdata->wake_gpio > 0) {
+		gpio_set_value(data->pdata->wake_gpio, 0);
+		msleep(80);
+	}
 
 	/* Soft reset */
 	mxt_write_object(data, MXT_GEN_COMMAND_T6,

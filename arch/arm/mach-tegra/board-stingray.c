@@ -16,6 +16,7 @@
 #include "pmc.h"
 
 void __init stingray_display_init(void);
+void __init stingray_input_init(void);
 
 #define STINGRAY_UARTB_IRQ 69
 
@@ -114,6 +115,7 @@ static void __init stingray_init_machine(void)
 		pr_err("stingray: UARTB registration failed: %d\n", err);
 
 	stingray_storage_init();
+	stingray_input_init();
 	stingray_display_init();
 }
 

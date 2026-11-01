@@ -40,3 +40,4 @@ obj-$(CONFIG_ARCH_TEGRA_2x_SOC)		+= board-paz00.o
 obj-$(CONFIG_MACH_STINGRAY)		+= board-stingray.o
 obj-$(CONFIG_MACH_STINGRAY)		+= board-stingray-storage.o
 obj-$(CONFIG_MACH_STINGRAY)		+= board-stingray-display.o
+obj-$(CONFIG_MACH_STINGRAY)		+= board-stingray-input.o
